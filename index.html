@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Chat App</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+<style>
+body{font-family:sans-serif;background:#ece5dd;margin:0;}
+.container{max-width:400px;margin:auto;display:flex;flex-direction:column;height:100vh;}
+
+.header{
+    background:#075E54;
+    color:#fff;
+    padding:10px;
+    font-size:16px;
+}
+
+#status{
+    font-size:12px;
+    opacity:0.8;
+}
+
+#chatBox{
+    flex:1;
+    overflow-y:auto;
+    padding:10px;
+    background:#ece5dd;
+}
+
+.msg{
+    max-width:70%;
+    padding:10px;
+    margin:5px 0;
+    border-radius:10px;
+}
+
+.me{
+    background:#DCF8C6;
+    margin-left:auto;
+}
+
+.other{
+    background:#fff;
+}
+
+.footer{
+    display:flex;
+    padding:10px;
+    background:#fff;
+}
+
+.footer input{
+    flex:1;
+    padding:10px;
+    border-radius:20px;
+    border:1px solid #ccc;
+}
+
+.footer button{
+    margin-left:5px;
+    padding:10px;
+    border:none;
+    background:#075E54;
+    color:#fff;
+    border-radius:50%;
+    cursor:pointer;
+}
+
+</style>
+
+</head>
+<body>
+
+<div class="container">
+
+<div class="header">
+    Chat App
+    <div id="status">Connecting...</div>
+    <div id="myIdBox" style="font-size:11px;margin-top:4px;"></div>
+    
+    <button onclick="startCall()" style="
+        float:right;
+        background:#25D366;
+        border:none;
+        padding:6px 10px;
+        border-radius:6px;
+        color:white;
+        cursor:pointer;
+    ">
+        <i class="fa-solid fa-phone"></i>
+    </button>
+</div>
+<div id="loginPopup" style="
+position:fixed;
+top:0;left:0;
+width:100%;
+height:100%;
+background:rgba(0,0,0,0.7);
+display:flex;
+align-items:center;
+justify-content:center;
+z-index:999;
+">
+    
+    <div style="
+background:#fff;
+padding:20px;
+border-radius:10px;
+text-align:center;
+width:80%;
+max-width:300px;
+">
+        
+        <h3>Welcome</h3>
+        <p>Your ID:</p>
+        <div id="showMyId" style="font-weight:bold;color:#075E54;"></div>
+        
+        <button onclick="enterApp()" style="
+margin-top:15px;
+padding:10px;
+width:100%;
+background:#075E54;
+color:#fff;
+border:none;
+border-radius:5px;
+cursor:pointer;
+">
+            Enter Chat
+        </button>
+        
+    </div>
+</div>
+<input id="userId" placeholder="Enter Friend ID" style="padding:10px;border:none;">
+
+<div id="chatBox"></div>
+
+<div class="footer">
+    <input id="msg" placeholder="Message">
+    <input type="file" id="imgInput" style="width:80px;">
+    <button onclick="sendMsg()">
+    <i class="fa-solid fa-paper-plane"></i>
+</button>
+</div>
+
+</div>
+
+<script type="module">
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-app.js";
+import { getFirestore, collection, addDoc, query, orderBy, onSnapshot, doc, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-auth.js";
+import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.11.0/firebase-storage.js";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyBKU5...",
+    authDomain: "qr-scanner-265fd.firebaseapp.com",
+    projectId: "qr-scanner-265fd"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+const storage = getStorage(app);
+
+let myId = "";
+let unsubscribe = null;
+
+// 🔥 CREATE CHAT ID
+function getChatId(a,b){
+    return [a,b].sort().join("_");
+}
+onAuthStateChanged(auth, async (user) => {
+    if (user) {
+        myId = user.uid;
+        
+        document.getElementById("showMyId").innerText = myId;
+        document.getElementById("myIdBox").innerText = "My ID: " + myId;
+        
+        await setDoc(doc(db, "users", myId), {
+            online: true,
+            lastSeen: new Date()
+        });
+    }
+});
+window.enterApp = function() {
+    document.getElementById("loginPopup").style.display = "none";
+}
+window.startCall = function() {
+    
+    let userId = document.getElementById("userId").value.trim();
+    
+    if (!userId) {
+        alert("Enter Friend ID first");
+        return;
+    }
+    
+    alert("📞 Calling " + userId + "...\n(Realtime call feature need WebRTC)");
+}
+window.enterApp = function() {
+    document.getElementById("loginPopup").style.display = "none";
+    loadChat();
+}
+// 🔥 AUTO LOGIN
+signInAnonymously(auth);
+
+onAuthStateChanged(auth, async (user) => {
+    if(user){
+        myId = user.uid;
+
+        // set online
+        await setDoc(doc(db,"users",myId),{
+            online:true,
+            lastSeen:new Date()
+        });
+
+        loadChat();
+    }
+});
+
+// 🔥 SEND MESSAGE
+window.sendMsg = async function(){
+
+    let userId = document.getElementById("userId").value.trim();
+    let text = document.getElementById("msg").value.trim();
+    let file = document.getElementById("imgInput").files[0];
+
+    if(!userId){
+        alert("Enter Friend ID");
+        return;
+    }
+
+    let chatId = getChatId(myId,userId);
+
+    let imgUrl = "";
+
+    if(file){
+        let storageRef = ref(storage,"chatImages/"+Date.now());
+        await uploadBytes(storageRef,file);
+        imgUrl = await getDownloadURL(storageRef);
+    }
+
+    await addDoc(collection(db,"messages",chatId,"chat"),{
+        sender: myId,
+        receiver: userId,
+        text: text,
+        image: imgUrl,
+        time: new Date()
+    });
+
+    document.getElementById("msg").value="";
+    document.getElementById("imgInput").value="";
+}
+
+// 🔥 LOAD CHAT
+function loadChat(){
+
+    let userId = document.getElementById("userId").value.trim();
+    if(!userId) return;
+
+    let chatId = getChatId(myId,userId);
+
+    let q = query(collection(db,"messages",chatId,"chat"),orderBy("time"));
+
+    if(unsubscribe) unsubscribe();
+
+    unsubscribe = onSnapshot(q,(snap)=>{
+
+        let box = document.getElementById("chatBox");
+        box.innerHTML="";
+
+        snap.forEach(docu=>{
+            let d = docu.data();
+
+            let div = document.createElement("div");
+            div.className = "msg " + (d.sender===myId ? "me":"other");
+
+            div.innerHTML = `
+                ${d.text ? `<div>${d.text}</div>`:""}
+                ${d.image ? `<img src="${d.image}" style="width:100%;margin-top:5px;border-radius:8px;">`:""}
+            `;
+
+            box.appendChild(div);
+        });
+
+        box.scrollTop = box.scrollHeight;
+    });
+
+    listenStatus(userId);
+}
+
+// 🔥 ONLINE STATUS
+function listenStatus(userId){
+
+    onSnapshot(doc(db,"users",userId),(snap)=>{
+
+        let d = snap.data();
+        let el = document.getElementById("status");
+
+        if(!d) return;
+
+        if(d.online){
+            el.innerText = "Online";
+        }else{
+            el.innerText = "Last seen: " + new Date(d.lastSeen.seconds*1000).toLocaleString();
+        }
+    });
+}
+
+// 🔄 LOAD WHEN ID CHANGE
+document.getElementById("userId").addEventListener("change", loadChat);
+
+// 🔥 OFFLINE WHEN CLOSE
+window.addEventListener("beforeunload", async ()=>{
+    if(myId){
+        await updateDoc(doc(db,"users",myId),{
+            online:false,
+            lastSeen:new Date()
+        });
+    }
+});
+
+</script>
+
+</body>
+</html>
